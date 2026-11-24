@@ -1,23 +1,41 @@
-"""the declarative files at the repo root, and nothing else.
+"""what exists, and how to reach it.
 
-apps.toml says which apps exist and where they run, hosts/<name>/host.toml
-describes one pi, dns.toml owns the fleet's names. every command reads these
-rather than hardcoding a list.
+apps.toml says which apps there are and where they run, hosts/<name>/host.toml
+describes one pi, dns.toml owns the fleet's names. nothing is hardcoded here.
+
+credentials come from the remote-hosts file rmt already uses, so there is one
+place on this machine holding ssh passwords and it is not this repository.
+addresses come from `tailscale status`, so no ip is ever written down.
 """
 
 from __future__ import annotations
 
+import json
+import os
+import re
+import shutil
+import subprocess
 import tomllib
 from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+from . import ROOT
+
+HOSTS_FILE = Path(os.environ.get("REMOTE_HOSTS_CONFIG", Path.home() / ".config/remote/hosts.toml"))
+
+# "# rootpsw:" above a host carries the sudo password without making rmt treat
+# the host as password-auth, which is what the "password" key means to it
+SECRET_COMMENT = re.compile(r"^#\s*rootpsw:\s*(.+)$")
+KEY = re.compile(r'^(\w+)\s*=\s*"(.*)"$')
 
 
 def load(path: Path) -> dict:
     with path.open("rb") as f:
         return tomllib.load(f)
+
+
+# ── apps ────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -33,27 +51,25 @@ class App:
     files: tuple[dict[str, str], ...] = ()
 
     @property
-    def unit(self) -> str:
-        """the openrc service name, which is also the directory name"""
-        return self.name
-
-
-@dataclass(frozen=True)
-class Host:
-    name: str
-    glyph: str
-    plane: str
-    blurb: str
-    colors: dict[str, str]
-    services: tuple[str, ...]
+    def web_dir(self) -> Path:
+        return ROOT / self.name / "web"
 
     @property
-    def dir(self) -> Path:
-        return ROOT / "hosts" / self.name
+    def server_dir(self) -> Path:
+        return ROOT / self.name / "server"
 
     @property
-    def installable(self) -> bool:
-        return (self.dir / "install").is_file()
+    def api_url(self) -> str:
+        return f"http://127.0.0.1:{self.api}"
+
+    @property
+    def web_url(self) -> str:
+        return f"http://localhost:{self.web}"
+
+    @property
+    def artefacts(self) -> list[str]:
+        """everything of this app's that has to end up in build/"""
+        return [self.name, *(f["as"] for f in self.files)]
 
 
 @cache
@@ -88,6 +104,34 @@ def apps_on(host: str) -> tuple[App, ...]:
     return tuple(a for a in apps() if a.host == host)
 
 
+def app(name: str) -> App:
+    for a in apps():
+        if a.name == name:
+            return a
+    raise LookupError(f"unknown app {name!r}, have: {', '.join(a.name for a in apps())}")
+
+
+# ── hosts ───────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Host:
+    name: str
+    glyph: str
+    plane: str
+    blurb: str
+    colors: dict[str, str]
+    services: tuple[str, ...]
+
+    @property
+    def dir(self) -> Path:
+        return ROOT / "hosts" / self.name
+
+    @property
+    def installable(self) -> bool:
+        return (self.dir / "install").is_file()
+
+
 @cache
 def hosts() -> tuple[Host, ...]:
     out = []
@@ -114,7 +158,20 @@ def host(name: str) -> Host:
     for h in hosts():
         if h.name == name:
             return h
-    raise KeyError(f"unknown host {name!r}, have: {', '.join(host_names())}")
+    raise LookupError(f"unknown host {name!r}, have: {', '.join(host_names())}")
+
+
+def select(chosen: list[str]) -> list[str]:
+    """the hosts named on the command line, in fleet order; all of them by default"""
+    names = host_names()
+    if not chosen:
+        return names
+    if unknown := sorted(set(chosen) - set(names)):
+        raise LookupError(f"unknown host: {', '.join(unknown)} (have: {', '.join(names)})")
+    return [n for n in names if n in chosen]
+
+
+# ── dns ─────────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -147,9 +204,9 @@ def records() -> tuple[Record, ...]:
     out = [Record(a.domain, a.host, "app") for a in apps()]
     out += [Record(f"{name}.{zone}", target, "record") for name, target in dns()["records"].items()]
 
-    clash = {r.domain for r in out}
-    if len(clash) != len(out):
-        dupes = sorted(d for d in clash if sum(r.domain == d for r in out) > 1)
+    names = {r.domain for r in out}
+    if len(names) != len(out):
+        dupes = sorted(d for d in names if sum(r.domain == d for r in out) > 1)
         raise ValueError(f"dns.toml: {', '.join(dupes)} declared twice")
 
     known = set(host_names())
@@ -158,3 +215,103 @@ def records() -> tuple[Record, ...]:
             raise ValueError(f"dns.toml: {r.domain} points at unknown host {r.host!r}")
 
     return tuple(sorted(out, key=lambda r: r.domain))
+
+
+# ── credentials and addresses ───────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Credentials:
+    name: str
+    user: str
+    address: str
+    password: str = ""
+    rootpsw: str = ""
+
+    @property
+    def target(self) -> str:
+        return f"{self.user}@{self.address}"
+
+    @property
+    def sudo(self) -> str:
+        return self.rootpsw or self.password
+
+
+@cache
+def credentials() -> dict[str, Credentials]:
+    if not HOSTS_FILE.exists():
+        return {}
+
+    out: dict[str, Credentials] = {}
+    current: dict[str, str] = {}
+    pending: dict[str, str] = {}
+
+    def flush():
+        if name := current.get("name"):
+            out[name] = Credentials(
+                name=name,
+                user=current.get("user", ""),
+                address=current.get("host", name),
+                password=current.get("password", ""),
+                rootpsw=current.get("rootpsw", ""),
+            )
+
+    for raw in HOSTS_FILE.read_text().splitlines():
+        text = raw.strip()
+        if m := SECRET_COMMENT.match(text):
+            pending["rootpsw"] = m.group(1).strip()
+            continue
+        if text == "[[hosts]]":
+            flush()
+            current = dict(pending)
+            pending = {}
+            continue
+        if m := KEY.match(text):
+            current[m.group(1)] = m.group(2)
+    flush()
+    return out
+
+
+def credentials_for(name: str) -> Credentials:
+    creds = credentials().get(name)
+    if creds is None:
+        raise LookupError(f"no entry for {name} in {HOSTS_FILE}")
+    return creds
+
+
+@cache
+def tailnet() -> dict[str, str]:
+    """hostname -> tailnet ipv4, so dns.toml never has to name an address"""
+    if shutil.which("tailscale") is None:
+        return {}
+    try:
+        raw = subprocess.run(
+            ["tailscale", "status", "--json"], capture_output=True, timeout=10, check=True
+        ).stdout
+    except (subprocess.SubprocessError, OSError):
+        return {}
+
+    status = json.loads(raw)
+    peers = {"self": status.get("Self") or {}, **(status.get("Peer") or {})}
+    out: dict[str, str] = {}
+    for peer in peers.values():
+        name = peer.get("HostName")
+        v4 = next((ip for ip in peer.get("TailscaleIPs") or [] if ":" not in ip), None)
+        if name and v4:
+            out[name] = v4
+    return out
+
+
+def address_of(name: str) -> str:
+    """the tailnet address a dns rewrite should answer with"""
+    addr = tailnet().get(name)
+    if not addr:
+        raise LookupError(
+            f"tailscale does not know a host called {name!r}; "
+            "run `tailscale status` and check the machine name"
+        )
+    return addr
+
+
+def sshpass_available() -> bool:
+    return shutil.which("sshpass") is not None

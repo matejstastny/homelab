@@ -1,4 +1,4 @@
-"""the reconcile logic, against a stand-in for adguard's api.
+"""the reconcile logic against a stand-in for adguard's api, and .env.
 
 the real thing needs a live box and its web password, so the endpoints pi
 actually uses are reimplemented here. what this pins down is the part worth
@@ -10,10 +10,17 @@ that applying twice is a no-op.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import threading
 import unittest
+import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
+from pathlib import Path
 from unittest.mock import patch
+
+import cli
 
 from . import adguard
 
@@ -143,6 +150,72 @@ class ReconcileTest(unittest.TestCase):
         adguard.apply(self.client, adguard.plan(self.client, "leda"))
         self.assertEqual(FakeAdGuard.upstream, ["https://dns10.quad9.net/dns-query"])
         self.assertTrue(FakeAdGuard.bootstrap, "bootstrap must be set alongside")
+
+
+class DotenvTest(unittest.TestCase):
+    """the repo root's .env, which is where the adguard password lives"""
+
+    def read(self, text: str) -> dict[str, str]:
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / ".env").write_text(text)
+            with patch.object(cli, "ROOT", Path(tmp)):
+                cli.dotenv.cache_clear()
+                self.addCleanup(cli.dotenv.cache_clear)
+                return cli.dotenv()
+
+    def test_reads_pairs_and_ignores_the_rest(self):
+        got = self.read("# a comment\n\nADGUARD_PASSWORD = hunter2  \nQUOTED='x y'\njunk\n")
+        self.assertEqual(got, {"ADGUARD_PASSWORD": "hunter2", "QUOTED": "x y"})
+
+    def test_missing_file_is_not_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(cli, "ROOT", Path(tmp)):
+                cli.dotenv.cache_clear()
+                self.addCleanup(cli.dotenv.cache_clear)
+                self.assertEqual(cli.dotenv(), {})
+
+    def test_the_environment_wins(self):
+        with patch.dict(os.environ, {"ADGUARD_PASSWORD": "from-the-shell"}):
+            self.assertEqual(cli.env("ADGUARD_PASSWORD"), "from-the-shell")
+
+
+class RetryTest(unittest.TestCase):
+    """an adguard a sync just restarted needs a moment to accept connections"""
+
+    def setUp(self):
+        self.sleeps: list[float] = []
+        patcher = patch("cli.adguard.time.sleep", self.sleeps.append)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.client = adguard.Client(host="127.0.0.1", user="elara", password="x", port=1)
+
+    def test_a_refused_connection_is_retried_until_it_answers(self):
+        refused = urllib.error.URLError(ConnectionRefusedError())
+        attempts = [refused, refused, b'{"ok": true}']
+
+        def urlopen(req, timeout):
+            result = attempts.pop(0)
+            if isinstance(result, Exception):
+                raise result
+            return BytesIO(result)
+
+        with patch("cli.adguard.urllib.request.urlopen", urlopen):
+            self.assertEqual(self.client._call("/status"), {"ok": True})
+        self.assertEqual(self.sleeps, [1, 2], "should wait, not spin, between attempts")
+
+    def test_still_refused_after_every_retry_is_a_fault(self):
+        refused = urllib.error.URLError(ConnectionRefusedError())
+        with patch("cli.adguard.urllib.request.urlopen", side_effect=refused):
+            with self.assertRaises(adguard.APIError):
+                self.client._call("/status")
+        self.assertEqual(len(self.sleeps), len(adguard.RETRY_DELAYS), "one wait per retry")
+
+    def test_an_http_error_is_not_retried(self):
+        unauthorized = urllib.error.HTTPError("url", 401, "unauthorized", {}, None)
+        with patch("cli.adguard.urllib.request.urlopen", side_effect=unauthorized):
+            with self.assertRaises(adguard.APIError):
+                self.client._call("/status")
+        self.assertEqual(self.sleeps, [], "a real answer from adguard is never retried")
 
 
 if __name__ == "__main__":

@@ -4,8 +4,15 @@ set -eu
 
 packages="zsh zsh-autosuggestions zsh-syntax-highlighting starship eza zoxide fzf bat fd ripgrep git tmux btop fastfetch neovim curl less ncurses raspberrypi-utils-vcgencmd"
 
+# run once on a fresh pi, from the box itself: ssh in and run setup-pi.
+# pi sync pushes this script but never runs it, because installing packages
+# and changing the login shell is not something a routine sync should do.
 as_root() {
-	printf '%s\n' "${SUDO_PASS:-}" | sudo -S -p '' "$@"
+	if [ -n "${SUDO_PASS:-}" ]; then
+		printf '%s\n' "$SUDO_PASS" | sudo -S -p '' "$@"
+	else
+		sudo "$@"
+	fi
 }
 
 echo "enabling community repo"

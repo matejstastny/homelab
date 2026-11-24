@@ -1,183 +1,156 @@
-"""terminal output.
+"""output: one line per event, a clock in front of it.
 
-the fleet already has a visual language: lowercase text, `▸` for a step, `●`
-for a state, `!` for something you have to go fix by hand, a thin rule, and
-each pi tinted its own colour from hosts/<name>/host.toml. this module is that
-language and nothing more, so `pi`, `bin/services` and the install scripts all
-read like the same program.
+    [   0.000] check
+    [   1.204] gofmt                312 files
+    [   3.918] golangci-lint        ok
+    [  41.882] done                 14 steps, 41.9s
+
+the step being worked on redraws in place with its clock running, so a slow
+one still looks alive. when it finishes the line freezes and the next one
+starts. that is the whole visual language.
 """
 
 from __future__ import annotations
 
 import os
-import shutil
 import sys
+import threading
 import time
-from contextlib import contextmanager
 
 RESET = "\033[0m"
-BOLD = "\033[1m"
 DIM = "\033[38;2;120;120;140m"
 GREEN = "\033[38;2;166;227;161m"
 RED = "\033[38;2;243;139;168m"
 AMBER = "\033[38;2;242;205;140m"
 
-# 0 quiet, 1 normal, 2 verbose
-LEVEL = 1
-_colour = True
+LABEL = 20
+
+START = time.monotonic()
+_lock = threading.Lock()
+_tty = sys.stdout.isatty()
+_colour = _tty and not os.environ.get("NO_COLOR")
+_verbose = False
+_count = 0
 
 
-def setup(level: int, stream=None) -> None:
-    global LEVEL, _colour
-    LEVEL = level
-    stream = stream or sys.stdout
-    _colour = stream.isatty() and not os.environ.get("NO_COLOR")
+def setup(verbose: bool) -> None:
+    global _verbose
+    _verbose = verbose
+
+
+def steps() -> int:
+    """how many steps have finished, for the last line"""
+    return _count
 
 
 def paint(code: str, text: str) -> str:
     return f"{code}{text}{RESET}" if _colour else text
 
 
-def accent(hex_colour: str, text: str) -> str:
-    """truecolor from a #rrggbb in host.toml, the same way bin/services does"""
-    if not _colour:
-        return text
-    h = hex_colour.lstrip("#")
-    r, g, b = (int(h[i : i + 2], 16) for i in (0, 2, 4))
-    return f"\033[38;2;{r};{g};{b}m{text}{RESET}"
+def elapsed() -> float:
+    return time.monotonic() - START
 
 
-def width() -> int:
-    return max(64, min(96, shutil.get_terminal_size((80, 24)).columns))
+def _stamp() -> str:
+    return paint(DIM, f"[{elapsed():7.3f}]")
 
 
-def visible(text: str) -> int:
-    """length without the escape sequences, for right-aligning"""
-    out, skip = 0, False
-    for ch in text:
-        if ch == "\033":
-            skip = True
-        elif skip:
-            skip = ch != "m"
-        else:
-            out += 1
-    return out
+def _write(text: str, end: str) -> None:
+    with _lock:
+        sys.stdout.write(f"\r\033[K{text}{end}" if _tty else f"{text}{end}")
+        sys.stdout.flush()
 
 
 def line(text: str = "") -> None:
-    if LEVEL >= 1:
-        print(text, flush=True)
-
-
-def rule(colour: str | None = None) -> None:
-    bar = "─" * width()
-    line(accent(colour, bar) if colour else paint(DIM, bar))
-
-
-def heading(host) -> None:
-    """a host's section header, tinted that host's own colour"""
-    left = f"{host.glyph} {accent(host.colors['accent'], host.name)}"
-    right = paint(DIM, f"{host.plane} plane")
-    gap = max(1, width() - visible(left) - visible(right))
-    line()
-    line(f"{left}{' ' * gap}{right}")
-    rule(host.colors["accent"])
-
-
-def step(label: str, detail: str = "", timing: float | None = None) -> None:
-    body = f"  {paint(DIM, '▸')} {label:<10} {detail}"
-    if timing is None:
-        line(body.rstrip())
-        return
-    clock = paint(DIM, f"{timing:.1f}s")
-    gap = max(1, width() - visible(body) - visible(clock))
-    line(f"{body}{' ' * gap}{clock}")
+    """a finished line, stamped"""
+    _write(f"{_stamp()} {text}" if text else "", "\n")
 
 
 def detail(text: str) -> None:
-    """an extra line under a step, only when asked for"""
-    if LEVEL >= 2:
-        for ln in text.rstrip().splitlines():
-            line(f"      {paint(DIM, ln)}")
+    """extra lines under a step, only with -v"""
+    if not _verbose:
+        return
+    for ln in text.rstrip().splitlines():
+        if ln.strip():
+            _write(paint(DIM, f"           {ln}"), "\n")
+
+
+def _tag(text: str, code: str) -> str:
+    """a coloured label padded to the label column, escapes not counted"""
+    return paint(code, text) + " " * max(1, LABEL - len(text))
 
 
 def note(text: str) -> None:
-    """something the box needs a human for; install prints these as `!`"""
-    for ln in text.rstrip().splitlines():
-        line(f"      {paint(AMBER, '!')} {ln.lstrip('! ')}")
+    """something on the box needs a human; install scripts print these as !
 
-
-def added(text: str) -> None:
-    line(f"      {paint(GREEN, '+')} {text}")
-
-
-def removed(text: str) -> None:
-    line(f"      {paint(RED, '-')} {text}")
-
-
-def changed(text: str) -> None:
-    line(f"      {paint(AMBER, '~')} {text}")
-
-
-def same(text: str) -> None:
-    if LEVEL >= 2:
-        line(f"        {paint(DIM, text)}")
-
-
-def ok(text: str, timing: float | None = None) -> None:
-    body = f"  {paint(GREEN, '●')} {text}"
-    if timing is None:
-        line(body)
+    it sits under the step that produced it, like a detail line, but it is
+    always shown because nobody is going to re-run the sync with -v to find it.
+    a note is often more than one line: a headline plus why it matters, so the
+    whole block prints, not just the first line.
+    """
+    lines = [ln.strip() for ln in text.rstrip().splitlines() if ln.strip()]
+    if not lines:
         return
-    clock = paint(DIM, f"{timing:.1f}s")
-    gap = max(1, width() - visible(body) - visible(clock))
-    line(f"{body}{' ' * gap}{clock}")
-
-
-def failed(text: str) -> None:
-    head, *rest = text.splitlines() or [""]
-    line(f"  {paint(RED, '●')} {head}")
+    head, *rest = lines
+    _write(f"           {paint(AMBER, '!')} {head.lstrip('! ')}", "\n")
     for ln in rest:
-        line(f"    {paint(DIM, ln)}")
-
-
-def skipped(text: str) -> None:
-    line(f"  {paint(AMBER, '○')} {text}")
+        _write(f"             {paint(DIM, ln.lstrip('! '))}", "\n")
 
 
 def warn(text: str) -> None:
-    print(f"{paint(AMBER, 'warn:')} {text}", file=sys.stderr, flush=True)
+    line(paint(AMBER, text))
 
 
 def error(text: str) -> None:
-    print(f"{paint(RED, 'error:')} {text}", file=sys.stderr, flush=True)
+    head, *rest = text.splitlines() or [""]
+    line(paint(RED, head))
+    for ln in rest:
+        _write(paint(DIM, f"           {ln}"), "\n")
 
 
-def summary(results: dict[str, str], elapsed: float) -> None:
-    """the one line you read when you were not watching"""
-    from .manifest import hosts
-
-    glyphs = {h.name: (h.glyph, h.colors["accent"]) for h in hosts()}
-    parts = []
-    for name, state in results.items():
-        glyph, colour = glyphs.get(name, ("·", "#888888"))
-        mark = {"ok": GREEN, "failed": RED}.get(state, AMBER)
-        parts.append(f"{accent(colour, glyph)} {name} {paint(mark, state)}")
-
-    body = "  " + paint(DIM, " · ").join(parts)
-    clock = paint(DIM, f"{elapsed:.1f}s")
-    gap = max(1, width() - visible(body) - visible(clock))
-    line()
-    rule()
-    line(f"{body}{' ' * gap}{clock}")
-    line()
+def done(text: str) -> None:
+    line(f"{'done':<{LABEL}} {paint(GREEN, text)}")
 
 
-@contextmanager
-def timed():
-    start = time.monotonic()
-    box = [0.0]
-    try:
-        yield box
-    finally:
-        box[0] = time.monotonic() - start
+def failed(text: str) -> None:
+    line(f"{_tag('failed', RED)} {text}")
+
+
+class Step:
+    """one unit of work: a live line while it runs, a frozen one after."""
+
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self.result = ""
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def say(self, text: str) -> None:
+        """what the line ends with once the step is done"""
+        self.result = text
+
+    def _tick(self) -> None:
+        while not self._stop.wait(0.08):
+            _write(f"{_stamp()} {self.label:<{LABEL}} {paint(DIM, '···')}", "")
+
+    def __enter__(self) -> Step:
+        if _tty:
+            self._thread = threading.Thread(target=self._tick, daemon=True)
+            self._thread.start()
+        return self
+
+    def __exit__(self, kind, value, tb) -> bool:
+        global _count
+        _count += 1
+        self._stop.set()
+        if self._thread:
+            self._thread.join()
+        if kind is None:
+            line(f"{self.label:<{LABEL}} {paint(DIM, self.result or 'ok')}")
+        else:
+            line(f"{self.label:<{LABEL}} {paint(RED, 'failed')}")
+        return False
+
+
+def step(label: str) -> Step:
+    return Step(label)

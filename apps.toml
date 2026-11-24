@@ -1,15 +1,3 @@
-# every app here is one Go api with its Astro ui embedded in the binary,
-# reverse proxied by caddy on its host. this file is the only place that
-# knows an app exists: tools/dev.ts runs one locally, tools/build.ts
-# cross-compiles it, tools/check.ts checks it, and pi ships and installs it.
-#
-# name     directory at the repo root, and the openrc service name
-# api      loopback port the Go service binds, in dev and on the host alike
-# web      port the astro dev server uses locally, nothing on the host
-# env      local-only overrides, so dev never writes to /var/lib
-# needs    printed by `mise run dev` when the app wants something installed
-# files    extra payload beyond <name>.initd and <name>.confd
-
 [[app]]
 name = "ytdl"
 label = "youtube downloader"

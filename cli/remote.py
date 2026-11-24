@@ -11,7 +11,7 @@ import os
 import subprocess
 from dataclasses import dataclass
 
-from .fleet import Credentials
+from .manifest import Credentials
 
 CONNECT_TIMEOUT = 10
 
@@ -67,23 +67,11 @@ def run(creds: Credentials, remote: str | None, stdin: bytes | None = None) -> R
     )
 
 
-def attach(creds: Credentials, remote: str | None, stdin: bytes | None = None) -> int:
-    """hand the terminal over: an interactive shell, or `tail -f`"""
-    cmd, env = _command(creds, remote)
-    return subprocess.run(cmd, input=stdin, env=env).returncode
-
-
 def sudo(creds: Credentials, remote: str, extra: bytes = b"") -> Result:
     """run remote with $SUDO_PASS exported, read off stdin before anything else"""
     payload = creds.sudo.encode() + b"\n" + extra
     wrapper = "IFS= read -r SUDO_PASS; export SUDO_PASS; " + remote
     return run(creds, wrapper, stdin=payload)
-
-
-def sudo_attach(creds: Credentials, remote: str) -> int:
-    payload = creds.sudo.encode() + b"\n"
-    wrapper = "IFS= read -r SUDO_PASS; export SUDO_PASS; " + remote
-    return attach(creds, wrapper, stdin=payload)
 
 
 def reachable(creds: Credentials) -> bool:

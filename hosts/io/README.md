@@ -15,3 +15,7 @@ and `install`.
 transmission's rpc answers on loopback only. `transmission-done` hardlinks a
 finished video into jellyfin's library, which is why transmission is in the
 `media` group.
+
+neither torrent-server nor transmission's rpc behind it has a login of its
+own; the loopback bind plus caddy's tailnet/lan gate on `torrent.elara.boo`
+is the only thing guarding either of them.

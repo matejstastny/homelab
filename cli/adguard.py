@@ -13,14 +13,20 @@ from __future__ import annotations
 
 import base64
 import json
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 
-from . import Fault, manifest
-from .fleet import Credentials, address_of
+from . import Fault, env, manifest
+from .manifest import Credentials, address_of
 
 TIMEOUT = 10
+
+# a resolver just pushed by `pi sync` may still be mid-restart, or on a first
+# install mid-startup, when the dns pass reaches it a moment later; these are
+# the retry delays for a connection-level failure, not for an answer
+RETRY_DELAYS = (1, 2, 4, 8)
 
 
 class APIError(Fault):
@@ -43,26 +49,39 @@ class Client:
         token = base64.b64encode(f"{self.user}:{self.password}".encode()).decode()
         req.add_header("Authorization", f"Basic {token}")
 
-        try:
-            with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
-                raw = res.read()
-        except urllib.error.HTTPError as exc:
-            if exc.code == 401:
-                raise APIError(
-                    f"adguard on {self.host} rejected the login for {self.user!r}; "
-                    "set $PI_ADGUARD_PASS or an '# adguardpsw:' line in your "
-                    "remote-hosts entry"
-                ) from exc
-            raise APIError(f"{path}: {exc.code} {exc.reason}") from exc
-        except urllib.error.URLError as exc:
-            raise APIError(f"{path}: {exc.reason}") from exc
-
+        raw = self._open(req, path)
         if not raw:
             return None
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
             return None
+
+    def _open(self, req: urllib.request.Request, path: str) -> bytes:
+        """urlopen, retrying a connection-level failure.
+
+        a sync just restarted this adguard, or seeded it for the first time,
+        a moment ago; a refused or unreachable connection right after that is
+        the service still coming up, not a real failure, so it is worth a
+        few short waits before giving up. an http error is adguard actually
+        answering and is never retried.
+        """
+        for delay in (*RETRY_DELAYS, None):
+            try:
+                with urllib.request.urlopen(req, timeout=TIMEOUT) as res:
+                    return res.read()
+            except urllib.error.HTTPError as exc:
+                if exc.code == 401:
+                    raise APIError(
+                        f"adguard on {self.host} rejected the login for {self.user!r}; "
+                        "check ADGUARD_PASSWORD in .env"
+                    ) from exc
+                raise APIError(f"{path}: {exc.code} {exc.reason}") from exc
+            except urllib.error.URLError as exc:
+                if delay is None:
+                    raise APIError(f"{path}: {exc.reason}") from exc
+                time.sleep(delay)
+        raise AssertionError("unreachable")  # the loop above always returns or raises
 
     def rewrites(self) -> list[dict[str, str]]:
         return self._call("/rewrite/list") or []
@@ -158,6 +177,16 @@ def apply(client: Client, result: Plan) -> None:
         client.set_dns(result.upstream_to, list(manifest.dns()["bootstrap"]))
 
 
-def client_for(host: str, creds: Credentials, password: str) -> Client:
+def password() -> str:
+    """the adguard web login, the same one on every resolver. see .env.example"""
+    if value := env("ADGUARD_PASSWORD").strip():
+        return value
+    raise Fault(
+        "no adguard password, so dns cannot be reconciled.\n"
+        "copy .env.example to .env and put the adguard web login in it"
+    )
+
+
+def client_for(creds: Credentials) -> Client:
     cfg = manifest.dns()
-    return Client(host=creds.address, user=cfg["user"], password=password, port=cfg["port"])
+    return Client(host=creds.address, user=cfg["user"], password=password(), port=cfg["port"])
