@@ -11,5 +11,9 @@ ntfy = "thebe"
 jellyfin = "io"
 
 [resolvers]
-thebe = ["127.0.0.1:5335"]
+thebe = [
+    "https://dns10.quad9.net/dns-query",
+    "https://cloudflare-dns.com/dns-query",
+    "https://dns.mullvad.net/dns-query",
+]
 leda = ["https://dns10.quad9.net/dns-query"]

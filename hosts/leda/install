@@ -18,14 +18,14 @@ as_root apk add adguardhome adguardhome-openrc
 # the seed is shared by every resolver on the fleet and only lands on a box
 # that has never had adguard before; after that adguard owns the file. the
 # upstreams and the fleet's rewrites are left empty here and reconciled over
-# adguard's api by `pi dns`, so no sed ever edits a live config again.
+# adguard's api by `pi sync`, so no sed ever edits a live config again.
 if as_root test ! -f /var/lib/adguardhome/AdGuardHome.yaml; then
 	echo "▸ adguardhome: seeding config (first install only)"
 	as_root install -d -o adguardhome -g adguardhome -m 755 /var/lib/adguardhome
 	as_root install -o adguardhome -g adguardhome -m 640 "$self/adguardhome.yaml" /var/lib/adguardhome/AdGuardHome.yaml
-	echo "  ! set the web login at http://$(hostname):3000, then run: pi dns"
+	echo "  ! set the web login at http://$(hostname):3000, then run: pi sync"
 else
-	echo "▸ adguardhome: config present, leaving live state to \`pi dns\`"
+	echo "▸ adguardhome: config present, leaving live state to \`pi sync\`"
 fi
 
 echo "▸ node-exporter: installing"

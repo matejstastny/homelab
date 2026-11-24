@@ -23,10 +23,8 @@ from .manifest import Credentials, address_of
 
 TIMEOUT = 10
 
-# a resolver just pushed by `pi sync` may still be mid-restart, or on a first
-# install mid-startup, when the dns pass reaches it a moment later; these are
-# the retry delays for a connection-level failure, not for an answer
-RETRY_DELAYS = (1, 2, 4, 8)
+RETRY_DELAYS = (1, 2, 4, 8, 15)
+STARTUP_CODES = frozenset({404, 502, 503, 504})
 
 
 class APIError(Fault):
@@ -58,13 +56,14 @@ class Client:
             return None
 
     def _open(self, req: urllib.request.Request, path: str) -> bytes:
-        """urlopen, retrying a connection-level failure.
+        """urlopen, waiting out an adguard that has not finished starting.
 
-        a sync just restarted this adguard, or seeded it for the first time,
-        a moment ago; a refused or unreachable connection right after that is
-        the service still coming up, not a real failure, so it is worth a
-        few short waits before giving up. an http error is adguard actually
-        answering and is never retried.
+        a sync just restarted this adguard, or seeded it for the first time, a
+        moment ago. a refused connection right after that is the service still
+        coming up, and so is a 404 or a 5xx: adguard listens on its web port
+        before the control api exists. both are worth a few short waits. a 401
+        is adguard having a real opinion about the password and is never
+        retried.
         """
         for delay in (*RETRY_DELAYS, None):
             try:
@@ -76,7 +75,16 @@ class Client:
                         f"adguard on {self.host} rejected the login for {self.user!r}; "
                         "check ADGUARD_PASSWORD in .env"
                     ) from exc
-                raise APIError(f"{path}: {exc.code} {exc.reason}") from exc
+                if exc.code not in STARTUP_CODES:
+                    raise APIError(f"{path}: {exc.code} {exc.reason}") from exc
+                if delay is None:
+                    raise APIError(
+                        f"{path}: {exc.code} {exc.reason} from adguard on {self.host}, "
+                        f"still after {sum(RETRY_DELAYS)}s of waiting. either it never "
+                        "finished starting, or this adguard is too old to know the "
+                        "endpoint"
+                    ) from exc
+                time.sleep(delay)
             except urllib.error.URLError as exc:
                 if delay is None:
                     raise APIError(f"{path}: {exc.reason}") from exc

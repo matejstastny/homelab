@@ -7,7 +7,7 @@
 #                 password hash ever lands in git
 #   upstream_dns  per host, owned by dns.toml
 #   rewrites      the whole fleet's names, owned by dns.toml
-# run `pi dns` right after a first install to fill the last two in.
+# run `pi sync` right after a first install to fill the last two in.
 http:
   pprof:
     port: 6060

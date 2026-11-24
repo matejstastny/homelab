@@ -22,7 +22,7 @@ from unittest.mock import patch
 
 import cli
 
-from . import adguard
+from . import adguard, manifest
 
 
 class FakeAdGuard(BaseHTTPRequestHandler):
@@ -143,13 +143,27 @@ class ReconcileTest(unittest.TestCase):
         self.assertNotIn("old.elara.boo", [r["domain"] for r in FakeAdGuard.rewrites])
 
     def test_upstream_is_per_host(self):
-        adguard.apply(self.client, adguard.plan(self.client, "thebe"))
-        self.assertEqual(FakeAdGuard.upstream, ["127.0.0.1:5335"])
+        resolvers = manifest.dns()["resolvers"]
+        for host, upstream in resolvers.items():
+            with self.subTest(host=host):
+                FakeAdGuard.upstream = []
+                adguard.apply(self.client, adguard.plan(self.client, host))
+                self.assertEqual(FakeAdGuard.upstream, list(upstream))
+                self.assertTrue(FakeAdGuard.bootstrap, "bootstrap must be set alongside")
 
-        FakeAdGuard.upstream = []
-        adguard.apply(self.client, adguard.plan(self.client, "leda"))
-        self.assertEqual(FakeAdGuard.upstream, ["https://dns10.quad9.net/dns-query"])
-        self.assertTrue(FakeAdGuard.bootstrap, "bootstrap must be set alongside")
+    def test_no_resolver_points_at_a_loopback_upstream(self):
+        """thebe once had unbound on 127.0.0.1:5335 and no longer does.
+
+        a loopback upstream only resolves if something is listening on the box
+        itself, which is exactly the thing a removed package stops being true
+        of, quietly, at the next reboot.
+        """
+        for host, upstream in manifest.dns()["resolvers"].items():
+            for entry in upstream:
+                self.assertFalse(
+                    entry.startswith(("127.", "[::1]", "::1")),
+                    f"{host} resolves via {entry}, which nothing in hosts/ installs",
+                )
 
 
 class DotenvTest(unittest.TestCase):
@@ -210,12 +224,37 @@ class RetryTest(unittest.TestCase):
                 self.client._call("/status")
         self.assertEqual(len(self.sleeps), len(adguard.RETRY_DELAYS), "one wait per retry")
 
-    def test_an_http_error_is_not_retried(self):
+    def test_a_bad_password_is_not_retried(self):
         unauthorized = urllib.error.HTTPError("url", 401, "unauthorized", {}, None)
         with patch("cli.adguard.urllib.request.urlopen", side_effect=unauthorized):
             with self.assertRaises(adguard.APIError):
                 self.client._call("/status")
-        self.assertEqual(self.sleeps, [], "a real answer from adguard is never retried")
+        self.assertEqual(self.sleeps, [], "a rejected login will not fix itself")
+
+    def test_a_startup_404_is_retried_until_the_api_exists(self):
+        """adguard listens on :3000 before it registers /control, so a box
+        still working through a big query log 404s a good endpoint for a
+        while. that is the failure that broke `pi sync` on thebe."""
+        missing = urllib.error.HTTPError("url", 404, "Not Found", {}, None)
+        attempts = [missing, missing, b'{"ok": true}']
+
+        def urlopen(req, timeout):
+            result = attempts.pop(0)
+            if isinstance(result, Exception):
+                raise result
+            return BytesIO(result)
+
+        with patch("cli.adguard.urllib.request.urlopen", urlopen):
+            self.assertEqual(self.client._call("/rewrite/list"), {"ok": True})
+        self.assertEqual(self.sleeps, [1, 2])
+
+    def test_a_404_that_never_clears_names_the_host(self):
+        missing = urllib.error.HTTPError("url", 404, "Not Found", {}, None)
+        with patch("cli.adguard.urllib.request.urlopen", side_effect=missing):
+            with self.assertRaises(adguard.APIError) as caught:
+                self.client._call("/rewrite/list")
+        self.assertIn("127.0.0.1", str(caught.exception))
+        self.assertEqual(len(self.sleeps), len(adguard.RETRY_DELAYS), "one wait per retry")
 
 
 if __name__ == "__main__":

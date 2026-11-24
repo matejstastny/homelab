@@ -10,7 +10,6 @@ services = [
     "leds|leds|-",
     "watchdog|watchdog|watchdog",
     "tailscale subnet router|tailscale|tailscaled",
-    "unbound resolver|unbound|unbound",
     "adguard home|adguardhome|adguardhome",
     "caddy proxy|caddy|caddy",
     "ntfy|ntfy|ntfy",

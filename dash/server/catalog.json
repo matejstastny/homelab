@@ -47,11 +47,6 @@
             "probe": "tcp://thebe:53"
         },
         {
-            "name": "unbound",
-            "host": "thebe",
-            "blurb": "recursive DNS behind AdGuard Home, loopback only"
-        },
-        {
             "name": "caddy",
             "host": "thebe",
             "blurb": "ingress + DNS-01 certs for the public names",

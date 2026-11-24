@@ -13,7 +13,6 @@ config and a fleet cli for three raspberry pis, connected over tailscale
 |                            |                                                                             |
 | -------------------------- | --------------------------------------------------------------------------- |
 | `adguardhome`              | primary resolver                                                            |
-| `unbound`                  | recursive resolver behind AGH, keeps the query log off the upstream         |
 | `tailscale`                | subnet router advertising `192.168.250.0/24`, full LAN from anywhere        |
 | `caddy`                    | reverse proxy for everything on thebe and io, real names instead of `:3000` |
 | `ntfy`                     | push target for scripts, same idea as `notify-send` but on your phone       |
