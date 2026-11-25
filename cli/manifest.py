@@ -5,11 +5,14 @@ describes one pi, dns.toml owns the fleet's names. nothing is hardcoded here.
 
 credentials come from the remote-hosts file rmt already uses, so there is one
 place on this machine holding ssh passwords and it is not this repository.
-addresses come from `tailscale status`, so no ip is ever written down.
+fleet addresses come from `tailscale status`, so no pi's ip is ever written
+down. dns.toml's [addresses] is the one exception: things off the tailnet
+have no name to look up, so the answer is given literally.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
@@ -176,11 +179,17 @@ def select(chosen: list[str]) -> list[str]:
 
 @dataclass(frozen=True)
 class Record:
-    """one adguard rewrite: a name, the host it points at, and why"""
+    """one adguard rewrite: a name, what it answers with, and why"""
 
     domain: str
-    host: str
-    source: str  # "app" or "record"
+    target: str  # a fleet host, or a literal address when `literal`
+    source: str  # "app", "record" or "address"
+    literal: bool = False
+
+    @property
+    def why(self) -> str:
+        """the one-word reason shown next to this name in `pi sync`"""
+        return self.source if self.literal else self.target
 
 
 @cache
@@ -198,11 +207,17 @@ def records() -> tuple[Record, ...]:
     """every name the fleet's resolvers should answer for.
 
     the app names come from apps.toml so a new app is one entry in one file;
-    dns.toml only lists what is not an app.
+    dns.toml only lists what is not an app: [records] for a fleet host, whose
+    address is looked up, and [addresses] for anything off the tailnet, whose
+    address is written out because there is nothing to look it up in.
     """
     zone = dns()["zone"]
     out = [Record(a.domain, a.host, "app") for a in apps()]
     out += [Record(f"{name}.{zone}", target, "record") for name, target in dns()["records"].items()]
+    out += [
+        Record(f"{name}.{zone}", addr, "address", literal=True)
+        for name, addr in dns().get("addresses", {}).items()
+    ]
 
     names = {r.domain for r in out}
     if len(names) != len(out):
@@ -211,8 +226,15 @@ def records() -> tuple[Record, ...]:
 
     known = set(host_names())
     for r in out:
-        if r.host not in known:
-            raise ValueError(f"dns.toml: {r.domain} points at unknown host {r.host!r}")
+        if r.literal:
+            try:
+                ipaddress.ip_address(r.target)
+            except ValueError:
+                raise ValueError(
+                    f"dns.toml: {r.domain} answers with {r.target!r}, which is not an address"
+                ) from None
+        elif r.target not in known:
+            raise ValueError(f"dns.toml: {r.domain} points at unknown host {r.target!r}")
 
     return tuple(sorted(out, key=lambda r: r.domain))
 

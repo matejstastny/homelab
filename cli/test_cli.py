@@ -151,6 +151,20 @@ class ReconcileTest(unittest.TestCase):
                 self.assertEqual(FakeAdGuard.upstream, list(upstream))
                 self.assertTrue(FakeAdGuard.bootstrap, "bootstrap must be set alongside")
 
+    def test_a_literal_address_is_answered_verbatim(self):
+        """[addresses] names skip the tailnet lookup entirely.
+
+        address_of is patched to know thebe and io and nothing else, so a
+        literal that went through it would raise rather than quietly pass.
+        """
+        literals = {r.domain: r.target for r in manifest.records() if r.literal}
+        self.assertTrue(literals, "dns.toml declares no [addresses], nothing to pin down")
+
+        adguard.apply(self.client, adguard.plan(self.client, "thebe"))
+        live = {r["domain"]: r["answer"] for r in FakeAdGuard.rewrites}
+        for domain, addr in literals.items():
+            self.assertEqual(live[domain], addr)
+
     def test_no_resolver_points_at_a_loopback_upstream(self):
         """thebe once had unbound on 127.0.0.1:5335 and no longer does.
 
@@ -164,6 +178,55 @@ class ReconcileTest(unittest.TestCase):
                     entry.startswith(("127.", "[::1]", "::1")),
                     f"{host} resolves via {entry}, which nothing in hosts/ installs",
                 )
+
+
+class RecordsTest(unittest.TestCase):
+    """dns.toml's two kinds of name, and what a typo in either one does"""
+
+    def build(self, records: dict, addresses: dict) -> tuple[manifest.Record, ...]:
+        cfg = {"zone": "elara.boo", "records": records, "addresses": addresses}
+        with patch.object(manifest, "dns", return_value=cfg):
+            with patch.object(manifest, "apps", return_value=()):
+                with patch.object(manifest, "host_names", return_value=["thebe", "io"]):
+                    return manifest.records()
+
+    def test_a_host_record_is_not_literal(self):
+        (record,) = self.build({"dns": "thebe"}, {})
+        self.assertEqual(
+            (record.domain, record.target, record.literal), ("dns.elara.boo", "thebe", False)
+        )
+        self.assertEqual(record.why, "thebe")
+
+    def test_an_address_record_is_literal(self):
+        (record,) = self.build({}, {"router": "192.168.8.1"})
+        self.assertEqual(
+            (record.domain, record.target, record.literal),
+            ("router.elara.boo", "192.168.8.1", True),
+        )
+        self.assertEqual(record.why, "address")
+
+    def test_ipv6_is_an_address_too(self):
+        (record,) = self.build({}, {"router": "fd00::1"})
+        self.assertTrue(record.literal)
+
+    def test_an_address_that_is_not_an_address_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "not an address"):
+            self.build({}, {"router": "thebe"})
+
+    def test_a_host_that_is_not_a_host_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "unknown host"):
+            self.build({"dns": "192.168.8.1"}, {})
+
+    def test_the_two_tables_cannot_claim_one_name(self):
+        with self.assertRaisesRegex(ValueError, "declared twice"):
+            self.build({"router": "thebe"}, {"router": "192.168.8.1"})
+
+    def test_addresses_is_optional(self):
+        cfg = {"zone": "elara.boo", "records": {"dns": "thebe"}}
+        with patch.object(manifest, "dns", return_value=cfg):
+            with patch.object(manifest, "apps", return_value=()):
+                with patch.object(manifest, "host_names", return_value=["thebe"]):
+                    self.assertEqual(len(manifest.records()), 1)
 
 
 class DotenvTest(unittest.TestCase):

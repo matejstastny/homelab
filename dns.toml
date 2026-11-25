@@ -10,6 +10,12 @@ dns = "thebe"
 ntfy = "thebe"
 jellyfin = "io"
 
+# names answered with an address written out here instead of a fleet host.
+# these are off the tailnet, so there is nothing to look up; only boxes with a
+# route to the subnet can actually connect once the name resolves
+[addresses]
+router = "192.168.8.1"
+
 [resolvers]
 thebe = [
     "https://dns10.quad9.net/dns-query",

@@ -137,7 +137,8 @@ def desired() -> dict[str, tuple[str, str]]:
     """domain -> (answer, why), the same answer set for every resolver"""
     out = {}
     for record in manifest.records():
-        out[record.domain] = (address_of(record.host), record.host)
+        answer = record.target if record.literal else address_of(record.target)
+        out[record.domain] = (answer, record.why)
     return out
 
 
