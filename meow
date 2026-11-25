@@ -1,0 +1,43 @@
+- GL.iNet GL-BE6500 Flint 3e Wi-Fi 7 Router
+    - repeater, connected to my families wifi, ethernet access point
+    - 800mbs upload/download over ethernet, we have gigabit fiber
+
+- Samsung monitor 4k 60Hz, hdmi, dp, usb-c power delivery
+    - hdmi - clapshelled sl510
+    - dp - PC
+    - usb-c - macbook (display+power+ethernet-to-usba+one output of kvm plugged into monitor going over usbc)
+    - ethernet port 2 2.5ghz
+
+- PC, smaller than common tower, its half tall as wide
+    - Running Windows 11
+    - Intel Core i5-14400F
+    - Nvidia RTX 5060 Ti 8GB VRAM
+    - 1TB NVMe SSD Gen 4.0
+    - 650W 80+ Gold
+    - ethernet from router, port 1 5ghz
+    - stole second kvm output from the sl510
+
+- MacBook M2 Air 2024 16GB RAM 512GB 13 inch
+    - running Asahi Fedora Fairydust with Hyprland
+
+- Thinkpad SL-510
+    - clampshell mode
+    - running arch with i3
+    - 100gb KINGSTON SV300S37A120G
+    - 200GB ST9250315AS
+    - port 4 ethernet, 2.5ghz
+
+- 4 usb kvm
+    - logitech g502
+    - oldish keychron mechanical 80% keyboard
+    - razer chroma mous
+    - free for usb sticks
+
+- PoE switch to the raspberries, ethernet port 3, 5ghz
+
+- RPI Stack in a case, powered via usb-c from a big 200W usb source
+    - 3x Raspberry Pi 4 4GB Ram
+    - One with 1TB My Passport 07A8, data storage
+    - 2 with 64GB SD cards, recoverable services
+
+- Google Nest Mini on a stand

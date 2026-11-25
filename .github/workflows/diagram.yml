@@ -1,0 +1,45 @@
+name: Diagram
+
+on:
+    push:
+        paths:
+            - inventory.yaml
+            - diagram.py
+            - fetch_icons.py
+            - icons/**
+            - pyproject.toml
+            - uv.lock
+            - apps.toml
+            - hosts/**/host.toml
+            - dns.toml
+
+permissions:
+    contents: write
+
+jobs:
+    regenerate:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+            - uses: jdx/mise-action@v3
+            - name: diagram render deps
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y librsvg2-bin fonts-firacode
+                  curl -fsSL -o /tmp/fira.zip https://github.com/mozilla/Fira/archive/refs/heads/master.zip
+                  unzip -q /tmp/fira.zip -d /tmp/fira
+                  mkdir -p ~/.local/share/fonts
+                  cp /tmp/fira/Fira-master/ttf/FiraSans-*.ttf ~/.local/share/fonts/
+                  fc-cache -f
+            - run: uv sync
+            - run: uv run fetch_icons.py
+            - run: uv run diagram.py
+            - name: commit if changed
+              run: |
+                  if git status --porcelain docs/diagram.svg docs/diagram.png | grep -q .; then
+                      git config user.name "github-actions[bot]"
+                      git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                      git add docs/diagram.svg docs/diagram.png
+                      git commit -m "chore(diagram): regenerate"
+                      git push
+                  fi

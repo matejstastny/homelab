@@ -12,3 +12,8 @@ mise.local.toml
 .mypy_cache/
 __pycache__/
 .prettier-cache/
+
+# python (diagram.py / fetch_icons.py)
+.venv/
+icons/*.svg
+!icons/glyph-*.svg

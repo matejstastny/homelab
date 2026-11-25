@@ -13,4 +13,15 @@ jobs:
         steps:
             - uses: actions/checkout@v5
             - uses: jdx/mise-action@v3
+            # the "diagram" stage renders an SVG/PNG, which needs rsvg-convert and the real
+            # fonts installed - without Fira Sans every text-width calculation is off.
+            - name: diagram render deps
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y librsvg2-bin fonts-firacode
+                  curl -fsSL -o /tmp/fira.zip https://github.com/mozilla/Fira/archive/refs/heads/master.zip
+                  unzip -q /tmp/fira.zip -d /tmp/fira
+                  mkdir -p ~/.local/share/fonts
+                  cp /tmp/fira/Fira-master/ttf/FiraSans-*.ttf ~/.local/share/fonts/
+                  fc-cache -f
             - run: ./pi check

@@ -79,8 +79,23 @@ def python(fix: bool) -> None:
         sh("python3", "-m", "unittest", "discover", "-s", "cli", "-t", ".", "-q")
 
 
+def diagram(fix: bool) -> None:
+    """smoke-build only: proves the desk/fleet diagram still renders.
+
+    not a pixel diff against docs/diagram.* - that's the diagram.yml workflow's
+    job, it regenerates and commits the real thing on every relevant push.
+    """
+    with ui.step("uv sync"):
+        sh("uv", "sync")
+    with ui.step("fetch icons"):
+        sh("uv", "run", "fetch_icons.py")
+    with ui.step("render") as s:
+        sh("uv", "run", "diagram.py")
+        s.say("renders")
+
+
 # order matters: the apis embed web/dist, so the uis are built first
-STAGES = {"web": web, "go": go, "shell": shell, "python": python}
+STAGES = {"web": web, "go": go, "shell": shell, "python": python, "diagram": diagram}
 
 
 def main(args) -> int:

@@ -1,0 +1,13 @@
+[project]
+name = "homelab-diagram"
+version = "0.1.0"
+description = "Render the desk + pi-fleet setup diagram as SVG/PNG"
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml>=6.0",
+    "pillow>=9.0",
+]
+
+# this is a pair of scripts (diagram.py, fetch_icons.py), not an importable package
+[tool.uv]
+package = false

@@ -1,0 +1,95 @@
+# The physical/desk side of the setup diagram: everything that isn't already
+# tracked elsewhere in the repo. diagram.py reads this file for the hardware
+# layer and reads apps.toml / hosts/*/host.toml / dns.toml directly (via
+# cli.manifest) for the three pis, so that part never goes stale here.
+#
+# Source: meow (a plain-text note of the desk setup). Two readings worth
+# flagging if they're wrong:
+#   - the router's "Nghz" port labels are treated as the port's link-speed tag
+#     (5G / 2.5G), not a wifi-band claim on a wired port
+#   - the Nest Mini's wifi target is assumed to be this router, since it's the
+#     nearest wifi source and nothing else is specified
+
+meta:
+    title: "my setup"
+    date: "November 2026"
+
+internet:
+    note: "family's gigabit fiber"
+
+router:
+    name: "Flint 3e"
+    type: "wifi repeater / router"
+    model: "GL.iNet GL-BE6500 Flint 3e · Wi-Fi 7"
+    icons: [glinet]
+    note: "repeater off the family's wifi"
+    lan_note: "800 Mbit/s down/up over ethernet"
+    ports:
+        - { n: 1, to: pc, speed: "5G" }
+        - { n: 2, to: monitor, speed: "2.5G" }
+        - { n: 3, to: poe_switch, speed: "5G" }
+        - { n: 4, to: thinkpad, speed: "2.5G" }
+
+nest_mini:
+    name: "Nest Mini"
+    type: "smart speaker"
+    model: "Google Nest Mini · on a stand"
+    icons: [google-home]
+
+monitor:
+    name: "monitor"
+    type: "display"
+    model: "Samsung · 4K 60Hz"
+    ports: ["HDMI", "DP", "USB-C"]
+
+pc:
+    name: "PC"
+    type: "workstation"
+    model: "small tower · half as tall as wide"
+    os: "Windows 11"
+    icons: [windows]
+    hw:
+        - { icon: glyph-cpu, label: "CPU", value: "Core i5-14400F" }
+        - { icon: glyph-gpu, label: "GPU", value: "RTX 5060 Ti", sub: "8 GB VRAM" }
+        - { icon: glyph-ssd, label: "SSD", value: "1 TB NVMe Gen4" }
+        - { icon: glyph-power, label: "PSU", value: "650 W", sub: "80+ Gold" }
+
+macbook:
+    name: "MacBook Air"
+    type: "laptop"
+    model: 'M2 · 2024 · 16 GB / 512 GB · 13"'
+    os: 'Fedora Asahi "Fairydust" + Hyprland'
+    icons: [apple]
+
+thinkpad:
+    name: "ThinkPad SL-510"
+    type: "laptop (clamshell)"
+    os: "Arch + i3"
+    icons: [arch-linux]
+    hw:
+        - { icon: glyph-ssd, label: "SSD", value: "100 GB", sub: "Kingston SV300S37A120G" }
+        - { icon: glyph-hdd, label: "HDD", value: "200 GB", sub: "Seagate ST9250315AS" }
+
+kvm:
+    name: "KVM switch"
+    type: "4-port USB KVM"
+    peripherals:
+        - "Logitech G502"
+        - "Keychron 80% (mechanical)"
+        - "Razer Chroma mouse"
+        - "free port · USB sticks"
+
+poe_switch:
+    name: "PoE switch"
+    type: "switch"
+
+pi_fleet:
+    case_note: "3× Raspberry Pi 4 · 4 GB RAM, one case"
+    power_note: "200 W USB power source"
+    # which physical storage sits on which pi; everything else about each pi
+    # (name, glyph, color, blurb, services, apps) comes from hosts/*/host.toml
+    # and apps.toml by way of cli.manifest.
+    storage:
+        io: "1 TB My Passport 07A8 · USB · data storage"
+        thebe: "64 GB SD card · recoverable"
+        leda: "64 GB SD card · recoverable"

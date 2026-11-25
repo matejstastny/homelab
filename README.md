@@ -2,45 +2,22 @@
 
 config and a fleet cli for three raspberry pis, connected over tailscale
 
-|             |                                          |
-| ----------- | ---------------------------------------- |
-| ◑ **thebe** | global, network-wide and public services |
-| ◐ **leda**  | personal local services                  |
-| ◒ **io**    | storage heavy services                   |
+◑ [thebe](<https://en.wikipedia.org/wiki/Thebe_(moon)>) · ◐ [leda](<https://en.wikipedia.org/wiki/Leda_(moon)>) · ◒ [io](<https://en.wikipedia.org/wiki/Io_(moon)>)
 
-### ◑ [thebe](<https://en.wikipedia.org/wiki/Thebe_(moon)>)
+![the whole setup: desk hardware, the pi fleet and what each pi runs](docs/diagram.png)
 
-|                            |                                                                             |
-| -------------------------- | --------------------------------------------------------------------------- |
-| `adguardhome`              | primary resolver                                                            |
-| `tailscale`                | subnet router advertising `192.168.250.0/24`, full LAN from anywhere        |
-| `caddy`                    | reverse proxy for everything on thebe and io, real names instead of `:3000` |
-| `ntfy`                     | push target for scripts, same idea as `notify-send` but on your phone       |
-| `cloudflared`              | tunnels `elara.boo` out, no public port open anywhere                       |
-| `prometheus-node-exporter` | metrics scrape target for this box, ships to `victoria-metrics` on io       |
+## diagram
 
-### ◐ [leda](<https://en.wikipedia.org/wiki/Leda_(moon)>)
+the picture above is generated, not drawn: the desk hardware comes from
+`inventory.yaml`, the three pis' names, colors, blurbs, services and apps come
+straight from `apps.toml` / `hosts/*/host.toml` / `dns.toml` by way of
+`cli/manifest.py`, so it can't drift from the fleet config. a push that
+touches any of those regenerates and commits `docs/diagram.*` automatically
+(see `.github/workflows/diagram.yml`). to do it yourself:
 
-|                            |                                                                       |
-| -------------------------- | --------------------------------------------------------------------- |
-| `adguardhome`              | secondary resolver, independently forwards over Quad9 DoH             |
-| `soju`                     | persistent IRC bouncer                                                |
-| `tailscale`                | exit node, kept off thebe so bulk traffic doesn't compete with dns    |
-| `prometheus-node-exporter` | metrics scrape target for this box, ships to `victoria-metrics` on io |
-
-### ◒ [io](<https://en.wikipedia.org/wiki/Io_(moon)>)
-
-|                             |                                                                                                             |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `tailscale`                 | joined the tailnet                                                                                          |
-| `ytdl`                      | `yt.elara.boo`, mp4/mp3 with a web ui, 20 GB cache + `/srv/media` library, tailnet-only                     |
-| `share`                     | `share.elara.boo`, upload via web ui or the `share` script, keeps the last 10 files, tailnet-only           |
-| `caddy`                     | reverse proxy + DNS-01 cert for everything here, so bulk downloads never transit thebe                      |
-| `jellyfin`                  | media server at `jellyfin.elara.boo`, video side of the yt-dlp output, no hw transcode                      |
-| `transmission-daemon`       | torrent client at `torrent.elara.boo`; `transmission-done` hardlinks finished video into jellyfin's library |
-| `prometheus-node-exporter`  | metrics scrape target for io itself, scraped over loopback                                                  |
-| `victoria-metrics` + `dash` | custom Go + Astro fleet dashboard at `dash.elara.boo`                                                       |
-| `tasks`                     | weekly planner at `tasks.elara.boo`, repeats, carry-over and subscribed ics calendars, tailnet-only         |
+```
+uv sync && uv run fetch_icons.py && uv run diagram.py
+```
 
 ## layout
 
@@ -61,4 +38,6 @@ shared/ui/                   palette, fonts, html shell, fetch glue
 shell/ bin/                  what gets pushed to the pis
 cli/                         everything pi does
 pi                           wrapper for the cli to be on path
+inventory.yaml               the desk diagram's hardware layer (see "diagram")
+diagram.py fetch_icons.py    renders docs/diagram.{svg,png}
 ```
